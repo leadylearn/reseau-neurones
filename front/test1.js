@@ -583,39 +583,31 @@ async function handleFile(file) {
     log(`Fichier téléchargé : ${file.name}`);
     
     try {
-        // Créer un FormData pour envoyer le fichier
         const formData = new FormData();
         formData.append('file', file);
         
-        // Envoyer l'image au backend pour traitement
-        const response = await fetch('http://localhost:8000/process-image', {
+        console.log("Envoi de la requête au serveur...");
+        
+        const response = await fetch('http://localhost:8001/process-image', {
             method: 'POST',
-            body: formData,
-            headers: {
-                'Accept': 'application/json'
-            }
+            body: formData
         });
         
-        let result;
-        try {
-            result = await response.json();
-        } catch (e) {
-            console.error("Erreur lors de l'analyse de la réponse JSON:", e);
-            throw new Error("Réponse du serveur invalide");
-        }
+        console.log("Réponse reçue, statut:", response.status);
         
         if (!response.ok) {
-            console.error("Erreur du serveur:", result);
-            throw new Error(result.detail || `Erreur HTTP: ${response.status}`);
+            const errorText = await response.text();
+            console.error("Erreur du serveur:", errorText);
+            throw new Error(`Erreur HTTP: ${response.status} - ${errorText}`);
         }
         
-        console.log("Réponse du serveur:", result);
+        const result = await response.json();
+        console.log("Réponse JSON parsée:", result);
         
         if (result.success) {
             setStatus("Image traitée avec succès !");
             log("L'image a été validée par le pipeline de traitement.");
             
-            // Afficher les étapes de traitement dans les logs
             if (result.data && result.data.processing_steps) {
                 log("Étapes de traitement effectuées :");
                 result.data.processing_steps.forEach((step, index) => {
@@ -623,31 +615,30 @@ async function handleFile(file) {
                 });
             }
             
-            // Initialiser le modèle avec les paramètres de l'interface
-            state.reg = regEl.value;
+            // ----- Entraînement et animation de rétropropagation -----
+            // 1. Paramètres issus de l'interface
+            state.reg = parseFloat(regEl.value) || 0;
             state.showK = Math.max(2, parseInt(showKEl.value || "6", 10));
             state.inputK = Math.max(1, parseInt(inKEl.value || "3", 10));
             epochView.textContent = epochEl.value;
-            
-            // Redessiner le graphe
+
+            // 2. Réinitialisation des poids et redessiner le graphe
+            initParams();
             makeGraph();
-            
-            // Extraire les caractéristiques de l'image
+
+            // 3. Extraction des caractéristiques de l'image
             const x = await imageToFeatures(file);
             log(`Caractéristiques extraites : x=[${x.map(v => v.toFixed(3)).join(", ")}]`);
-            
-            // Utiliser la prédiction du backend si disponible, sinon une valeur aléatoire
-            const y = result.data.prediction !== undefined ? 
-                result.data.prediction : 
-                (Math.random() > 0.5 ? 1 : 0);
-                
+
+            // 4. Déterminer l'étiquette (backend ou aléatoire)
+            const y = result.data && result.data.prediction !== undefined ? result.data.prediction : (Math.random() > 0.5 ? 1 : 0);
             labelOut.textContent = String(y);
-            
-            // Entraînement du modèle
+
+            // 5. Boucle d'entraînement
             const EPOCHS = Math.max(1, parseInt(epochEl.value || "1", 10));
-            const eta = parseFloat(lrEl.value);
+            const eta = parseFloat(lrEl.value) || 0.1;
             lossHistory = [];
-            
+
             for (let e = 0; e < EPOCHS; e++) {
                 const { yhat, C } = forward(x, y);
                 backward();
@@ -658,69 +649,49 @@ async function handleFile(file) {
                 updateVisualNodeValues();
             }
             drawChart();
-            
-            // Dernière passe pour les gradients
+
+            // 6. Dernière passe pour les gradients et animation
             forward(x, y);
             backward();
-            
-            // Afficher les résultats dans une popup
-            try {
-                const popup = window.open('popup.html', 'popup', 'width=600,height=500');
-                if (popup) {
-                    popup.onload = function() {
-                        popup.postMessage({
-                            type: 'showResult',
-                            result: {
-                                success: true,
-                                message: "L'image a été traitée avec succès et peut être utilisée par le modèle.",
-                                imageUrl: result.data.original_filename ? 
-                                    `http://localhost:8000/processed/${result.data.original_filename}` : 
-                                    url,
-                                processingSteps: result.data.processing_steps || []
-                            }
-                        }, '*');
-                    };
+            log("Démarrage de l'animation de rétropropagation...");
+            buildBackpropSteps();
+            await playAll();
+            log("Animation terminée !");
+
+            // ----- Génération d'un fichier JSON avec les méta-données -----
+            function serialize(obj){
+                if(Array.isArray(obj)) return obj;
+                if(obj && typeof obj === 'object'){
+                    if('data' in obj) return obj.data; // petite matrice custom
+                    if('toArray' in obj) return obj.toArray();
                 }
-            } catch (e) {
-                console.error("Erreur lors de l'ouverture de la popup:", e);
+                return obj;
             }
-            
+            const metadata = {
+                image: file.name,
+                processing: result.data,
+                features: x,
+                                weights: Object.fromEntries(Object.entries(state.params || {}).map(([k,v])=>[k, serialize(v)])),
+                                gradients: Object.fromEntries(Object.entries(state.grads || {}).map(([k,v])=>[k, serialize(v)]))
+            };
+            const blob = new Blob([JSON.stringify(metadata, null, 2)], {type: 'application/json'});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `metadata_${file.name.replace(/\.[^/.]+$/, '')}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+            log("Fichier JSON téléchargé : " + link.download);
         } else {
-            throw new Error(result.error || "Erreur inconnue lors du traitement");
+            throw new Error(result.detail || "Erreur inconnue lors du traitement");
         }
-        
     } catch (error) {
-        console.error("Erreur lors du traitement de l'image :", error);
-        setStatus("Erreur lors du traitement");
+        console.error("Erreur complète:", error);
+        setStatus("Erreur lors du traitement", false);
         log(`Erreur : ${error.message}`);
-        
-        // Afficher l'erreur dans une popup
-        try {
-            const popup = window.open('popup.html', 'popup', 'width=600,height=300');
-            if (popup) {
-                popup.onload = function() {
-                    popup.postMessage({
-                        type: 'showResult',
-                        result: {
-                            success: false,
-                            error: `L'image n'a pas pu être traitée : ${error.message}`
-                        }
-                    }, '*');
-                };
-            }
-        } catch (e) {
-            console.error("Erreur lors de l'affichage de l'erreur:", e);
-        }
-        
-        // Ne pas continuer avec l'animation en cas d'erreur
-        return;
     }
-
-    log("Démarrage de l'animation de rétropropagation...");
-    buildBackpropSteps();
-    await playAll();
 }
-
 /* Layer controls */
 function refreshLayerCount(){
   layerCountEl.textContent=String(state.hiddenLayers.length);
