@@ -423,76 +423,105 @@ function removeToken(token){
 }
 
 function buildBackpropSteps(){
-  steps=[]; stepIndex=0;
-  viz.hoverEnabled=false;
-  tooltip.style.display="none";
+  steps = [];
+  stepIndex = 0;
+  viz.hoverEnabled = false;
+  tooltip.style.display = "none";
 
-  // Build an ordered list of edges from output layer backward to input
-  // We'll animate dw for each edge (one by one).
-  const g=model.grads;
-  const c=model.cache;
-  const sizes=c.sizes; // [in, h1, h2, ..., out]
-  const L=sizes.length-1; // number of weight layers
-
-  // Edge order: last weight layer first (hidden->out), then previous..., ending at input->h1
-  // We'll only animate visible edges (the ones we actually drew).
-  const edgeList=[...viz.edges.values()];
+  const g = model.grads;
+  const sizes = model.cache.sizes;
+  const L = sizes.length - 1;
+  const edgeList = [...viz.edges.values()];
 
   function edgesForLayer(l){
-    return edgeList.filter(e=>e.l===l);
+    return edgeList.filter(e => e.l === l);
   }
 
-  // Intro step
-  steps.push(async()=>{
+  // Intro
+  steps.push(async () => {
     resetHighlights();
     updateEdgeAppearanceNoLabels();
-    setStatus("backprop animation running…",true);
-    log("Backprop animation: revealing one weight + one gradient at a time.");
+    setStatus("backprop animation running…", true);
+    log("Backprop animation (grouped by neuron).");
   });
 
-  // For each layer from last to first:
-  for(let l=L-1; l>=0; l--){
-    const layerEdges=edgesForLayer(l);
+  // Layer by layer (output → input)
+  for (let l = L - 1; l >= 0; l--) {
+    const layerEdges = edgesForLayer(l);
 
-    // Sort stable by id so animation is deterministic
-    layerEdges.sort((a,b)=>a.id.localeCompare(b.id));
-
-    for(const e of layerEdges){
-      steps.push(async()=>{
-        resetHighlights();
-        dimAllEdges();
-        glowEdge(e.id);
-        glowNode(e.fromId);
-        glowNode(e.toId);
-
-        // Compute current weight and its gradient from model.grads (real ones)
-        const w=model.W[e.l][e.outI][e.inJ];
-        const dw=g.dW[e.l][e.outI][e.inJ];
-
-        // Show ONLY this edge's label
-        setOnlyEdgeLabels(e.id,w,dw);
-
-        // token travel along the edge (from "to" back to the middle)
-        const from=viz.nodes.get(e.fromId);
-        const to=viz.nodes.get(e.toId);
-        const tok=makeToken("dw", to.x-35, to.y);
-        await animateToken(tok, to.x-35, to.y, e.mx, e.my, 520);
-        removeToken(tok);
-
-        log(`${e.id}: w=${w.toFixed(5)}  dw=${dw.toFixed(5)}`);
-      });
+    // 🔑 GROUP BY SOURCE NEURON
+    const edgesByFrom = {};
+    for (const e of layerEdges) {
+      if (!edgesByFrom[e.fromId]) {
+        edgesByFrom[e.fromId] = [];
+      }
+      edgesByFrom[e.fromId].push(e);
     }
+
+    // Deterministic order of neurons
+    const fromIds = Object.keys(edgesByFrom).sort((a, b) => {
+  const na = viz.nodes.get(a).neuronIndex;
+  const nb = viz.nodes.get(b).neuronIndex;
+  return na - nb;
+});
+
+    for (const fromId of fromIds) {
+  const edges = edgesByFrom[fromId];
+
+  // ✅ TRI DÉFINITIF ET CORRECT
+  const edgesSorted = [...edges].sort((a, b) => {
+    const na = viz.nodes.get(a.toId).neuronIndex;
+    const nb = viz.nodes.get(b.toId).neuronIndex;
+    return na - nb;
+  });
+
+  for (const e of edgesSorted) {
+    steps.push(async () => {
+      resetHighlights();
+      dimAllEdges();
+      glowNode(e.fromId);
+      glowNode(e.toId);
+      glowEdge(e.id);
+
+      const w  = model.W[e.l][e.outI][e.inJ];
+      const dw = g.dW[e.l][e.outI][e.inJ];
+
+      setOnlyEdgeLabels(e.id, w, dw);
+
+      const from = viz.nodes.get(e.fromId);
+      const to   = viz.nodes.get(e.toId);
+
+      const tok = makeToken(`dw=${dw.toFixed(3)}`, to.x, to.y);
+      await animateToken(tok, to.x, to.y, from.x, from.y, 1500);
+      removeToken(tok);
+    });
+  }
+}
+
+
   }
 
-  // End: enable hover (to inspect any edge)
-  steps.push(async()=>{
+  // End
+  steps.push(async () => {
     resetHighlights();
     updateEdgeAppearanceNoLabels();
-    viz.hoverEnabled=true;
-    setStatus("done (hover edges)",false);
-    log("Backprop animation done. Hover an edge to see w and dw.");
+    viz.hoverEnabled = true;
+    setStatus("done (hover edges)", false);
+    log("Backprop animation done.");
   });
 }
+
+
+async function playAll(){
+  if(playing) return;
+  playing=true;
+  while(stepIndex<steps.length){
+    await steps[stepIndex++]();
+    await new Promise(r=>setTimeout(r,120));
+  }
+  playing=false;
+}
+
 
 async function playAll(){
   if(playing) return;
