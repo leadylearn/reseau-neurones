@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Dog/Cat NN Simulator — Backprop Visualizer</title>
+
+  <!-- Main UI styles -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  <!-- Socket.IO client -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+<div class="field">
+  <label>Show K (hidden)</label>
+  <input id="showK" type="number" min="2" value="6">
+</div>
+
+<div class="field">
+  <label>Show K (input)</label>
+  <input id="inK" type="number" min="1" value="3">
+</div>
+
+<div class="field">
+  <label>New layer size</label>
+  <input id="newSize" type="number" min="1" value="16">
+</div>
+
+<!-- ================= TOP BAR ================= -->
+<div class="topbar">
+  <div class="field">
+    <label>Epoch</label>
+    <select id="epoch">
+      <option value="5">5</option>
+      <option value="10" selected>10</option>
+      <option value="15">15</option>
+      <option value="20">20</option>
+      <option value="25">25</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label>Learning rate</label>
+    <select id="lr">
+      <option value="0.00001">0.00001</option>
+      <option value="0.0001">0.0001</option>
+      <option value="0.001" selected>0.001</option>
+      <option value="0.01">0.01</option>
+      <option value="0.1">0.1</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label>Activation</label>
+    <select id="act">
+      <option value="relu" selected>ReLU</option>
+      <option value="tanh">tanh</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label>Regularization</label>
+    <select id="reg">
+      <option value="none" selected>None</option>
+      <option value="l2">L2</option>
+    </select>
+  </div>
+
+
+  <button id="trainBtn"
+    style="margin-left:auto;padding:8px 16px;background:#3b82f6;color:white;
+           border:none;border-radius:10px;font-weight:700;cursor:pointer;">
+    Start Server Training
+  </button>
+
+  <div class="statusPill">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">waiting for upload</span>
+  </div>
+</div>
+
+<!-- ================= MAIN ================= -->
+<div class="main">
+
+  <!-- LEFT PANEL -->
+  <div class="panel">
+    <div class="panelHeader">
+      <span>Input image</span>
+      <span class="mono" style="font-size:12px;color:var(--muted)">dog / cat</span>
+    </div>
+
+    <div class="panelBody">
+      <div class="uploadBox" id="dropZone">
+        <div class="uploadIcon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.6"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <path d="M14 2v6h6"/>
+            <path d="M12 18V11"/>
+            <path d="M9 14l3-3 3 3"/>
+          </svg>
+        </div>
+
+        <div class="hint">
+          Upload an image → input drawn as <span class="mono">0-0…0-0</span><br/>
+          Hidden layers condensed like <span class="mono">0-0-0-0…</span><br/>
+          Backprop shows <b>one gradient at a time</b>
+        </div>
+
+        <input id="file" type="file" accept="image/*" hidden />
+        <button id="btnChoose">Choose image</button>
+
+        <div class="preview" id="preview">
+          <img id="previewImg" alt="preview"/>
+        </div>
+      </div>
+
+      <div class="log mono" id="log"></div>
+    </div>
+  </div>
+
+  <!-- CENTER NETWORK -->
+  <div class="centerWrap">
+    <div class="layerBanner">
+      <div class="btn" id="btnRem">−</div>
+      <div class="btn" id="btnAdd">+</div>
+      <div class="count"><span id="layerCount">3</span> HIDDEN LAYERS</div>
+    </div>
+
+    <div class="networkStage">
+      <svg id="svg" viewBox="0 0 900 620" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="panel">
+    <div class="panelHeader">
+      <span>Loss Curve</span>
+      <span class="mono" style="font-size:12px;color:var(--muted)">BCE</span>
+    </div>
+
+    <div class="panelBody">
+      <canvas id="chart" width="800" height="520"></canvas>
+
+      <div class="rightStats">
+        <div class="stat"><div class="k">ŷ</div><div class="v mono" id="yhat">—</div></div>
+        <div class="stat"><div class="k">Loss</div><div class="v mono" id="loss">—</div></div>
+        <div class="stat"><div class="k">Label</div><div class="v mono" id="labelY">—</div></div>
+        <div class="stat"><div class="k">Epoch</div><div class="v mono" id="epochView">1</div></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ================= SERVER LOGS ================= -->
+<div class="panel" style="margin:20px">
+  <div class="panelHeader">Server Logs</div>
+  <div class="panelBody mono" id="serverLogs"
+       style="height:160px;overflow:auto;font-size:12px;"></div>
+</div>
+
+<div id="tooltip"></div>
+
+<!-- Main JS -->
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
