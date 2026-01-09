@@ -777,6 +777,7 @@ if(trainBtn) {
     serverLossHistory = [];
     
     // START POLLING: Ask for data every 100ms (10 frames per second)
+    // This makes the visualization smooth regardless of training speed
     if (pollingLoop) clearInterval(pollingLoop);
     pollingLoop = setInterval(() => {
         socket.emit('pull_update');
@@ -803,10 +804,10 @@ socket.on('training_step', (data) => {
 
   // Update Chart
   serverLossHistory.push(data.loss);
-  if(serverLossHistory.length > 50) serverLossHistory.shift(); 
+  if(serverLossHistory.length > 50) serverLossHistory.shift(); // Keep chart clean
   drawServerChart(serverLossHistory);
 
-  // Update Visuals 
+  // Update Visuals (No need for extra throttling checks now, the polling interval controls speed)
   simulateServerNetwork(data.loss);
 });
 
@@ -825,6 +826,7 @@ socket.on('training_complete', () => {
       pollingLoop = null;
   }
 });
+
 // ... (Keep simulateServerNetwork and other helper functions the same) ...
 
 /* ============================================================
